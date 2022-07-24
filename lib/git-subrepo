@@ -76,6 +76,7 @@ m,message=  Specify a commit message
 r,remote=   Specify the upstream remote to push/pull/fetch
 s,squash    Squash commits on push
 u,update    Add the --branch and/or --remote overrides to .gitrepo
+w,shallow   If should skip subdirs containing subrepos during a push
  
 q,quiet     Show minimal output
 v,verbose   Show verbose output
@@ -119,6 +120,7 @@ main() {
   local subrepo_branch=         # Upstream branch to clone/push/pull
   local subrepo_commit=         # Upstream HEAD from previous clone/pull
   local subrepo_parent=         # Local commit from before previous clone/pull
+  local subrepo_shallow=        # If should skip subdirs containing subrepos during a push
   local subrepo_former=         # A retired gitrepo key that might still exist
 
   local refs_subrepo_branch=    # A subrepo ref -> commit of branch/pull command
@@ -185,6 +187,7 @@ main() {
 
 # `git subrepo clone <url> [<subdir>]` command:
 command:clone() {
+  local shallow=${subrepo_shallow:=false}
   command-setup +subrepo_remote subdir:guess-subdir
 
   # Clone (or reclone) the subrepo into the subdir:
@@ -207,6 +210,7 @@ command:init() {
   command-setup +subdir
   local remote=${subrepo_remote:=none}
   local branch=${subrepo_branch:=master}
+  local shallow=${subrepo_shallow:=false}
 
   # Init new subrepo from the subdir:
   subrepo:init
@@ -358,7 +362,7 @@ command:config() {
   # shellcheck disable=2154
   o "Update '$subdir' configuration with $config_option=${config_value-}"
 
-  if [[ ! $config_option =~ ^(branch|cmdver|commit|method|remote|version)$ ]]; then
+  if [[ ! $config_option =~ ^(branch|cmdver|commit|method|remote|version|shallow)$ ]]; then
     error "Option $config_option not recognized"
   fi
 
@@ -711,6 +715,7 @@ subrepo:branch() {
 
   local last_gitrepo_commit=
   local first_gitrepo_commit=
+  local shallow=${subrepo_shallow:=false}
 
   o "Subrepo parent: $subrepo_parent"
   if [[ $subrepo_parent ]]; then
@@ -813,18 +818,20 @@ subrepo:branch() {
   fi
 
   # Mechanism to skip subdirs containing subrepos during a push.
-  # TODO: 1) mention dependency on 'find'; 2) may be turned on/off on option.
-  if which find > /dev/null; then
-    o "Checking $subdir for nested subdirs to avoid"
-    local subdirs
-    mapfile -t subdirs < <(cd -- "$subdir"; find -mindepth 1 -type d -exec 'test' '-f' '{}/.gitrepo' ';' -print)
-    if [[ ${#subdirs[@]} -gt 0 ]]; then
-      for d in "${subdirs[@]}"; do
-        o "Found $d: will rebase to exclude it";
-        git filter-branch -f --index-filter "git rm -r --cached --ignore-unmatch \"${d}\"" "$branch" || true
-      done
-    fi
-  fi
+  # TODO: mention dependency on 'find'.
+	if $subrepo_shallow ; then
+		if which find > /dev/null; then
+			o "Checking $subdir for nested subdirs to avoid"
+			local subdirs
+			mapfile -t subdirs < <(cd -- "$subdir"; find -mindepth 1 -type d -exec 'test' '-f' '{}/.gitrepo' ';' -print)
+			if [[ ${#subdirs[@]} -gt 0 ]]; then
+				for d in "${subdirs[@]}"; do
+					o "Found $d: will rebase to exclude it";
+					git filter-branch -f --index-filter "git rm -r --cached --ignore-unmatch \"${d}\"" "$branch" || true
+				done
+			fi
+		fi
+	fi
 
   o "Remove the .gitrepo file from $first_gitrepo_commit..$branch"
   local filter=$branch
@@ -1060,6 +1067,7 @@ get-command-options() {
       -s) squash_wanted=true ;;
       -u) update_wanted=true
           commit_msg_args+=("--update") ;;
+      -w) subrepo_shallow=true ;;
       -q) quiet_wanted=true ;;
       -v) verbose_wanted=true ;;
       -d) debug_wanted=true ;;
@@ -1113,11 +1121,11 @@ get-command-options() {
 options_help='all'
 options_branch='all fetch force'
 options_clean='ALL all force'
-options_clone='branch edit force message method'
+options_clone='branch edit force message method shallow'
 options_config='force'
 options_commit='edit fetch force message'
 options_fetch='all branch remote'
-options_init='branch remote method'
+options_init='branch remote method shallow'
 options_pull='all branch edit force message remote update'
 options_push='all branch force remote squash update'
 options_status='ALL all fetch'
@@ -1382,6 +1390,9 @@ read-gitrepo-file() {
       SAY=false OUT=true RUN git config --file="$gitrepo" subrepo.former
     subrepo_former=$output
   fi
+
+  SAY=false OUT=true RUN git config --file="$gitrepo" subrepo.shallow
+  subrepo_shallow=$output
 }
 
 
@@ -1420,6 +1431,9 @@ update-gitrepo-file() {
   fi
 
   RUN git config --file="$gitrepo" subrepo.commit "$upstream_head_commit"
+
+	# saving shallow option
+  RUN git config --file="$gitrepo" subrepo.shallow "$subrepo_shallow"
   # Only write new parent when we are at the head of upstream
   if [[ $upstream_head_commit && $subrepo_commit_ref ]]; then
     OUT=true RUN git rev-parse "$subrepo_commit_ref"
