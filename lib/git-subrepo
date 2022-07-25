@@ -1391,7 +1391,7 @@ read-gitrepo-file() {
     subrepo_former=$output
   fi
 
-  SAY=false OUT=true RUN git config --file="$gitrepo" subrepo.shallow
+  SAY=false OUT=true RUN git config --get --type bool --default false --file="$gitrepo" subrepo.shallow
   subrepo_shallow=$output
 }
 
