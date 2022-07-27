@@ -548,7 +548,11 @@ subrepo:pull() {
   subrepo_commit_ref=$branch_name
 
   o "Create subrepo branch '$branch_name'."
+  # on pull we do want to consider subrepo otherwise they would be removed
+  local shallow=${subrepo_shallow:=false}
+  subrepo_shallow=false
   CALL subrepo:branch
+  subrepo_shallow=$shallow
   cd "$worktree";
 
   if [[ $join_method == rebase ]]; then
@@ -819,7 +823,7 @@ subrepo:branch() {
 
   # Mechanism to skip subdirs containing subrepos during a push.
   # TODO: mention dependency on 'find'.
-	if $subrepo_shallow ; then
+	if $shallow ; then
 		if which find > /dev/null; then
 			o "Checking $subdir for nested subdirs to avoid"
 			local subdirs
