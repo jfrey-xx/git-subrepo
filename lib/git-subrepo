@@ -592,6 +592,7 @@ subrepo:push() {
   local branch_name=$branch
   local new_upstream=false
   local branch_created=false
+  local shallow=${subrepo_shallow:=false}
 
   if [[ -z $branch_name ]]; then
     FAIL=false OUT=false CALL subrepo:fetch
@@ -656,6 +657,14 @@ subrepo:push() {
   new_upstream_head_commit=$(git rev-parse "$branch_name")
   if ! $new_upstream; then
     if [[ $upstream_head_commit == "$new_upstream_head_commit" ]]; then
+      OK=false
+      CODE=-2
+      return
+    fi
+    # TODO: hackish way to check against cases where subrepos where updated, but with shallow options seems to create empty merge commit, creating empty commit upstream?
+    line_changed=$(git log --numstat --format= -1 "$branch_name" | wc -l)
+    if [ $line_changed -eq 0  ] && $shallow ; then
+      echo "EXPERIMENTAL: detected empty merge commit with shallow option, considering that there is nothing to push. Please check manually and report bugs."
       OK=false
       CODE=-2
       return
